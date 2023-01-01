@@ -1,6 +1,8 @@
 # Campaign Factory Smart Contract
 
-This smart contract allows users to create and manage social media campaigns.
+The Campaign Factory smart contract is designed to streamline the management of social media campaigns by automating the process of selecting and rewarding content creators for their social media engagement. 
+Brands can use the contract to create campaigns, specify the required number of likes, and set the reward for completing the campaign. Users can then apply to participate in a campaign, and the contract will select one user to complete the like goal. 
+The use of a smart contract on the Ethereum blockchain ensures transparency and security for all parties involved in the campaign.
 
 [Testnet Deployment](https://goerli.etherscan.io/address/0x8e0b7e6062272b5e023ecd2be471e95d5f7b6a8a#code) |
 [Mainnet Deployment](https://etherscan.io/address/0x8e0b7e6062272b5e023ecd2be471e95d5f7b6a8a#code)
