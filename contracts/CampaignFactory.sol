@@ -12,10 +12,6 @@ import "@openzeppelin/contracts/utils/Counters.sol";
 contract CampaignFactory is Ownable {
     error ValidationError();
 
-    /**
-     * @notice Thrown when a precondition is not met
-     * @param id The id of the campaign
-     */
     error PreConditionError(uint256 id);
 
     error CampaignDoesNotExist(uint256 id);
@@ -44,6 +40,23 @@ contract CampaignFactory is Ownable {
         uint256 activeTime;
     }
 
+    struct Brand {
+        string name;
+        string description;
+        string image;
+    }
+
+    /**
+     * @notice A mapping of address to brands
+     * @dev This mapping is used to keep track of all brands
+     */
+    mapping(address => Brand) brands;
+
+    /**
+     * @notice A mapping of campaign ids to campaigns
+     * @dev This mapping is used to keep track of all campaigns
+     *     created by brands
+     */
     mapping(uint256 => Campaign) campaigns;
 
     /**
@@ -113,7 +126,26 @@ contract CampaignFactory is Ownable {
         uint256 timestamp
     );
 
-    modifier canApply(uint256 _id, address _user) {
+    /**
+     * @notice Emitted when a new brand is added
+     * @param brand The address of the brand
+     * @param name The name of the brand
+     * @param description The description of the brand
+     * @param image The brand image
+     */
+    event BrandAdded(address brand, string name, string description, string image);
+
+    /**
+     * @notice Emitted when a brand is removed
+     * @param id The id of the brand
+     */
+    event BrandRemoved(uint256 id);
+
+    /**
+     * @notice Modifier to check if a campaign exists
+     * @param _id The id of the campaign
+     */
+    modifier canApply(uint256 _id) {
         if (_id >= _campaignIds.current()) {
             revert CampaignDoesNotExist(_id);
         }
@@ -146,12 +178,13 @@ contract CampaignFactory is Ownable {
         string memory _image,
         uint256 _minLikes,
         uint256 _activeTime
-    ) public payable onlyOwner {
+    ) public payable {
         if (_activeTime <= 0) revert ValidationError();
         if (_minLikes <= 0) revert ValidationError();
         if (bytes(_name).length <= 0) revert ValidationError();
         if (msg.value <= 0) revert ValidationError();
-
+        if (brands[msg.sender].name == "") revert ValidationError();
+        
         uint256 newCampaignIdea = _campaignIds.current();
 
         campaigns[newCampaignIdea] = Campaign({
@@ -181,7 +214,7 @@ contract CampaignFactory is Ownable {
      * @notice assign a user to a campaign
      * @param _id The id of the campaign
      */
-    function submitApplication(uint256 _id) public canApply(_id, msg.sender) {
+    function submitApplication(uint256 _id) public canApply(_id) {
         if (campaigns[_id].user != address(0)) {
             revert PreConditionError(_id);
         }
@@ -202,7 +235,7 @@ contract CampaignFactory is Ownable {
     function reviewApplications(
         uint256 _id,
         address _user
-    ) public onlyOwner canApply(_id, _user) {
+    ) public onlyOwner canApply(_id) {
         if (!applications[_id][_user]) revert UserAlreadyApplied(_id, _user);
 
         campaigns[_id].user = _user;
@@ -275,5 +308,35 @@ contract CampaignFactory is Ownable {
         }
 
         payable(msg.sender).transfer(campaigns[_id].payout);
+    }
+
+    /**
+     * @notice add a new brand
+     * @param _name The name of the brand
+     * @param _description The description of the brand
+     * @param _image The brand image
+     */
+    function addBrand(
+        string memory _name,
+        string memory _description,
+        string memory _image,
+        address _brandAddress
+    ) public onlyOwner {
+        brands[_brandAddress] = Brand({
+            name: _name,
+            description: _description,
+            image: _image
+        });
+
+        emit BrandAdded(newBrandId, _name, _description, _image);
+    }
+
+    /**
+     * @notice remove a brand
+     * @param _brandAddress The address of the brand
+     */
+    function removeBrand(address _brandAddress) public onlyOwner {
+        delete brands[_brandAddress];
+        emit BrandRemoved(newBrandId);
     }
 }
