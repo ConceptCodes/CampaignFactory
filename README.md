@@ -62,7 +62,22 @@ The counter keeping tracks of campaigns is incremented.
 And we fire the  **Created** event with relevant details about the new campaign.
 
 
+### Submit Application
 
+![submitApplication](./assets/submitApplication.png)
+
+This function allows users to apply to participate in a campaign. 
+It takes one parameter, the ID of the campaign.
+
+To be eligible to apply, the following conditions must be met:
+
+- The campaign must exist
+- The status of the campaign must not be `ACTIVE`
+- There must be time left on the campaign
+- The user must not have already applied for the campaign
+
+If any of these conditions are not met, the function will revert.
+If the user is eligible to apply, the we will set your applied status to true and fire the **Applied** event.
 
 
 
