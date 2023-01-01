@@ -2,6 +2,7 @@
 pragma solidity ^0.8.9;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/Counters.sol";
 
 /**
  * @title Campaign Factory
@@ -12,28 +13,24 @@ contract CampaignFactory is Ownable {
     error ValidationError();
 
     /**
-     * @notice Thrown when a campaign is not active
-     * @param id The id of the campaign
-     */
-    error NotActiveError(uint256 id);
-
-    /**
      * @notice Thrown when a precondition is not met
      * @param id The id of the campaign
      */
     error PreConditionError(uint256 id);
+
+    error CampaignDoesNotExist(uint256 id);
+
+    error UserAlreadyApplied(uint256 id, address user);
+
+    using Counters for Counters.Counter;
+
+    Counters.Counter private _campaignIds;
 
     enum Status {
         Created,
         Active,
         Finished
     }
-
-    /**
-     * @notice A mapping of campaign ids to user addresses
-     * @dev This mapping is used to keep track of which users liked a campaign
-     */
-    mapping(uint256 => mapping(address => bool)) likes;
 
     struct Campaign {
         string name;
@@ -43,11 +40,24 @@ contract CampaignFactory is Ownable {
         uint256 minLikes;
         Status status;
         uint256 payout;
-        address payable user;
+        address user;
         uint256 activeTime;
     }
 
-    Campaign[] campaigns;
+    mapping(uint256 => Campaign) campaigns;
+
+    /**
+     * @notice A mapping of campaign ids to user addresses
+     * @dev This mapping is used to keep track of which users liked a campaign
+     */
+    mapping(uint256 => mapping(address => bool)) likes;
+
+    /**
+     * @notice A mapping of campaign ids to user addresses
+     * @dev This mapping is used to keep track of which users
+     *      applied to participate in a campaign
+     */
+    mapping(uint256 => mapping(address => bool)) public applications;
 
     /**
      * @notice Emitted when a new campaign is created
@@ -55,30 +65,69 @@ contract CampaignFactory is Ownable {
      * @param name The name of the campaign
      * @param minLikes The minimum number of likes to finish the campaign
      * @param endDate The end date of the campaign
+     * @param timestamp The timestamp of the event
      */
-    event Created(uint256 id, string name, uint256 minLikes, uint256 endDate);
+    event Created(
+        uint256 id,
+        string name,
+        uint256 minLikes,
+        uint256 endDate,
+        uint256 timestamp
+    );
+
+    /**
+     * @notice Emitted when a user applies to a campaign
+     * @param id The id of the campaign
+     * @param user The address of the user
+     * @param timestamp The timestamp of the event
+     */
+    event Applied(uint256 id, address indexed user, uint256 timestamp);
 
     /**
      * @notice Emitted when a user gets assigned to a campaign
      * @param id The id of the campaign
      * @param user The address of the user
+     * @param timestamp The timestamp of the event
      */
-    event Assigned(uint256 id, address indexed user);
+    event Assigned(uint256 id, address indexed user, uint256 timestamp);
 
     /**
      * @notice Emitted when a user likes a campaign
      * @param id The id of the campaign
      * @param user The address of the user
+     * @param timestamp The timestamp of the event
      */
-    event Liked(uint256 id, address indexed user);
+    event Liked(uint256 id, address indexed user, uint256 timestamp);
 
     /**
      * @notice Emitted when a campaign is finished
      * @param id The id of the campaign
      * @param user The address of the user
      * @param payout The payout of the campaign
+     * @param timestamp The timestamp of the event
      */
-    event Finished(uint256 id, address indexed user, uint256 payout);
+    event Finished(
+        uint256 id,
+        address indexed user,
+        uint256 payout,
+        uint256 timestamp
+    );
+
+    modifier canApply(uint256 _id, address _user) {
+        if (_id >= _campaignIds.current()) {
+            revert CampaignDoesNotExist(_id);
+        }
+
+        if (campaigns[_id].status != Status.Created) {
+            revert PreConditionError(_id);
+        }
+
+        if (campaigns[_id].activeTime < block.timestamp) {
+            revert PreConditionError(_id);
+        }
+
+        _;
+    }
 
     constructor() {}
 
@@ -86,11 +135,9 @@ contract CampaignFactory is Ownable {
      * @notice Create a new campaign
      * @param _name The name of the campaign
      * @param _description The description of the campaign
-     * @param _image The image of the campaign
+     * @param _image The campaign image
      * @param _minLikes The minimum number of likes to finish the campaign
      * @param _activeTime The time the campaign will be active
-     * @dev The campaign is intially assigned to the contract owner,
-     *      but users can link an inactive campaign to their address
      * @dev we use the onlyOwner modifier to ensure that only the contract owner can create a campaign
      */
     function create(
@@ -105,62 +152,81 @@ contract CampaignFactory is Ownable {
         if (bytes(_name).length <= 0) revert ValidationError();
         if (msg.value <= 0) revert ValidationError();
 
-        Campaign storage c = campaigns.push();
+        uint256 newCampaignIdea = _campaignIds.current();
 
-        c.name = _name;
-        c.description = _description;
-        c.image = _image;
-        c.minLikes = _minLikes;
-        c.status = Status.Created;
-        c.payout = msg.value;
-        c.activeTime = block.timestamp + _activeTime;
+        campaigns[newCampaignIdea] = Campaign({
+            name: _name,
+            description: _description,
+            image: _image,
+            totalLikes: 0,
+            minLikes: _minLikes,
+            status: Status.Created,
+            payout: msg.value,
+            user: address(0),
+            activeTime: block.timestamp + _activeTime
+        });
 
-        payable(address(this)).transfer(msg.value);
+        _campaignIds.increment();
 
         emit Created(
-            campaigns.length - 1,
+            newCampaignIdea,
             _name,
             _minLikes,
-            block.timestamp + _activeTime
+            block.timestamp + _activeTime,
+            block.timestamp
         );
     }
 
     /**
      * @notice assign a user to a campaign
      * @param _id The id of the campaign
-     * @dev If the campaign is not active & time is still availble,
-     *      it will be linked to the senders address
      */
-    function assign(uint256 _id) public {
-        if (
-            campaigns[_id].status != Status.Created ||
-            campaigns[_id].status != Status.Finished
-        ) {
+    function submitApplication(uint256 _id) public canApply(_id, msg.sender) {
+        if (campaigns[_id].user != address(0)) {
             revert PreConditionError(_id);
         }
 
-        if (campaigns[_id].activeTime < block.timestamp) {
-            revert PreConditionError(_id);
-        }
+        if (applications[_id][msg.sender])
+            revert UserAlreadyApplied(_id, msg.sender);
 
-        campaigns[_id].user = payable(msg.sender);
+        applications[_id][msg.sender] = true;
+
+        emit Applied(_id, msg.sender, block.timestamp);
+    }
+
+    /**
+     * @notice accept a user to a campaign
+     * @param _id The id of the campaign
+     * @param _user The address of the user
+     */
+    function reviewApplications(
+        uint256 _id,
+        address _user
+    ) public onlyOwner canApply(_id, _user) {
+        if (!applications[_id][_user]) revert UserAlreadyApplied(_id, _user);
+
+        campaigns[_id].user = _user;
         campaigns[_id].status = Status.Active;
 
-        emit Assigned(_id, msg.sender);
+        delete applications[_id][_user];
+
+        emit Assigned(_id, _user, block.timestamp);
     }
 
     /**
      * @notice like a campaign
      * @param _id The id of the campaign
-     * @dev If the campaign is active, the user can like it
+     * @dev If the campaign is active, the user can like the campaign once
      */
     function like(uint256 _id) public {
         if (campaigns[_id].status != Status.Active) {
-            revert NotActiveError(_id);
+            revert PreConditionError(_id);
         }
+
         if (campaigns[_id].activeTime < block.timestamp) {
-            revert NotActiveError(_id);
+            revert PreConditionError(_id);
         }
+
         if (likes[_id][msg.sender]) {
             revert PreConditionError(_id);
         }
@@ -168,7 +234,7 @@ contract CampaignFactory is Ownable {
         likes[_id][msg.sender] = true;
         campaigns[_id].totalLikes++;
 
-        emit Liked(_id, msg.sender);
+        emit Liked(_id, msg.sender, block.timestamp);
     }
 
     /**
@@ -176,7 +242,7 @@ contract CampaignFactory is Ownable {
      * @return The number of campaigns
      */
     function getCampaignCount() public view returns (uint256) {
-        return campaigns.length;
+        return _campaignIds.current();
     }
 
     /**
@@ -200,7 +266,12 @@ contract CampaignFactory is Ownable {
 
         if (campaigns[_id].totalLikes >= campaigns[_id].minLikes) {
             campaigns[_id].status = Status.Finished;
-            emit Finished(_id, msg.sender, campaigns[_id].payout);
+            emit Finished(
+                _id,
+                msg.sender,
+                campaigns[_id].payout,
+                block.timestamp
+            );
         }
 
         payable(msg.sender).transfer(campaigns[_id].payout);
