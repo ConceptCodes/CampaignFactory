@@ -2,9 +2,12 @@
 
 This smart contract allows users to create and manage social media campaigns.
 
+[Testnet Deployment](https://goerli.etherscan.io/address/0x8e0b7e6062272b5e023ecd2be471e95d5f7b6a8a#code) |
+[Mainnet Deployment](https://etherscan.io/address/0x8e0b7e6062272b5e023ecd2be471e95d5f7b6a8a#code)
+
 
 ## Features
-- Brands can create new campaigns by and track their engagement.
+- Brands can create new campaigns and track their engagement.
 - Users can apply to participate in a campaign.
 - The owner of the contract can assign a user to a campaign 
   - if they have not chosen a random user is selected.
