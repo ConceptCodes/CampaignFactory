@@ -4,20 +4,13 @@ pragma solidity ^0.8.9;
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/Counters.sol";
 
+
 /**
  * @title Campaign Factory
  * @author conceptcodes.eth
  * @notice This contract is used to manage social media campaigns
  */
 contract CampaignFactory is Ownable {
-    error ValidationError();
-
-    error PreConditionError(uint256 id);
-
-    error CampaignDoesNotExist(uint256 id);
-
-    error UserAlreadyApplied(uint256 id, address user);
-
     using Counters for Counters.Counter;
 
     Counters.Counter private _campaignIds;
@@ -27,6 +20,20 @@ contract CampaignFactory is Ownable {
         Active,
         Finished
     }
+
+    enum ErrorType {
+      NotActive,
+      WrongUser,
+      HasNotApplied,
+      HasApplied,
+      CampaignError,
+      HasLiked,
+      NotApplied
+    }
+
+    error ValidationError();
+
+    error PreConditionError(uint256 id, ErrorType errorType);
 
     struct Campaign {
         string name;
@@ -132,14 +139,22 @@ contract CampaignFactory is Ownable {
      * @param name The name of the brand
      * @param description The description of the brand
      * @param image The brand image
+     * @param timestamp The timestamp of the event
      */
-    event BrandAdded(address brand, string name, string description, string image);
+    event BrandAdded(
+        address brand,
+        string name,
+        string description,
+        string image,
+        uint256 timestamp
+    );
 
     /**
      * @notice Emitted when a brand is removed
      * @param id The id of the brand
+     * @param timestamp The timestamp of the event
      */
-    event BrandRemoved(uint256 id);
+    event BrandRemoved(uint256 id, uint256 timestamp);
 
     /**
      * @notice Modifier to check if a campaign exists
@@ -147,15 +162,15 @@ contract CampaignFactory is Ownable {
      */
     modifier canApply(uint256 _id) {
         if (_id >= _campaignIds.current()) {
-            revert CampaignDoesNotExist(_id);
+            revert PreConditionError(_id, ErrorType.CampaignError);
         }
 
         if (campaigns[_id].status != Status.Created) {
-            revert PreConditionError(_id);
+            revert PreConditionError(_id, ErrorType.NotActive);
         }
 
         if (campaigns[_id].activeTime < block.timestamp) {
-            revert PreConditionError(_id);
+            revert PreConditionError(_id, ErrorType.NotActive);
         }
 
         _;
@@ -181,10 +196,10 @@ contract CampaignFactory is Ownable {
     ) public payable {
         if (_activeTime <= 0) revert ValidationError();
         if (_minLikes <= 0) revert ValidationError();
-        if (bytes(_name).length <= 0) revert ValidationError();
+        if (bytes(_name).length == 0) revert ValidationError();
         if (msg.value <= 0) revert ValidationError();
-        if (brands[msg.sender].name == "") revert ValidationError();
-        
+        if (bytes(brands[msg.sender].name).length == 0) revert ValidationError();
+
         uint256 newCampaignIdea = _campaignIds.current();
 
         campaigns[newCampaignIdea] = Campaign({
@@ -216,11 +231,12 @@ contract CampaignFactory is Ownable {
      */
     function submitApplication(uint256 _id) public canApply(_id) {
         if (campaigns[_id].user != address(0)) {
-            revert PreConditionError(_id);
+            revert PreConditionError(_id, ErrorType.WrongUser);
         }
 
-        if (applications[_id][msg.sender])
-            revert UserAlreadyApplied(_id, msg.sender);
+        if (applications[_id][msg.sender]) {
+            revert PreConditionError(_id, ErrorType.HasApplied);
+        }
 
         applications[_id][msg.sender] = true;
 
@@ -236,7 +252,9 @@ contract CampaignFactory is Ownable {
         uint256 _id,
         address _user
     ) public onlyOwner canApply(_id) {
-        if (!applications[_id][_user]) revert UserAlreadyApplied(_id, _user);
+        if (!applications[_id][_user]) {
+          revert PreConditionError(_id, ErrorType.NotApplied);
+        }
 
         campaigns[_id].user = _user;
         campaigns[_id].status = Status.Active;
@@ -253,15 +271,15 @@ contract CampaignFactory is Ownable {
      */
     function like(uint256 _id) public {
         if (campaigns[_id].status != Status.Active) {
-            revert PreConditionError(_id);
+            revert PreConditionError(_id, ErrorType.NotActive);
         }
 
         if (campaigns[_id].activeTime < block.timestamp) {
-            revert PreConditionError(_id);
+            revert PreConditionError(_id, ErrorType.NotActive);
         }
 
         if (likes[_id][msg.sender]) {
-            revert PreConditionError(_id);
+            revert PreConditionError(_id, ErrorType.HasLiked);
         }
 
         likes[_id][msg.sender] = true;
@@ -328,7 +346,7 @@ contract CampaignFactory is Ownable {
             image: _image
         });
 
-        emit BrandAdded(newBrandId, _name, _description, _image);
+        emit BrandAdded(_brandAddress, _name, _description, _image, block.timestamp);
     }
 
     /**
@@ -337,6 +355,6 @@ contract CampaignFactory is Ownable {
      */
     function removeBrand(address _brandAddress) public onlyOwner {
         delete brands[_brandAddress];
-        emit BrandRemoved(newBrandId);
+        emit BrandRemoved(_brandAddress, block.timestamp);
     }
 }

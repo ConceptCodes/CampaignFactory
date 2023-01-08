@@ -18,6 +18,10 @@ The use of a smart contract on the Ethereum blockchain ensures transparency and 
   - The user who participated in the campaign receives a payout.
 
 
+## Roadmap
+- [] Add a max application limit to campaigns, and time lock a transaction to pick a random user.
+- [] Add a function to allow users to withdraw their application.
+
 
 ## Dependencies
 [OpenZeppelin Ownable](https://docs.openzeppelin.com/contracts/4.x/api/access#Ownable) 
@@ -53,7 +57,7 @@ It takes in several parameters:
 - A description,
 - An image, 
 - The minimum number of likes needed to finish the campaign, 
-- Length of time that the campaign will be active. 
+- Length of time the campaign will be active for. 
 
 we then perform several checks to ensure that the input data is valid, such as making sure that the
 
@@ -84,5 +88,20 @@ To be eligible to apply, the following conditions must be met:
 If any of these conditions are not met, the function will revert.
 If the user is eligible to apply, the we will set your applied status to true and fire the **Applied** event.
 
+
+### Review Application 
+
+![reviewApplication](./assets/reviewApplication.png)
+
+This function is used to accept a user's application to participate in a campaign. 
+It is called by the contract owner and requires two parameters: 
+
+- the ID of the campaign 
+- address of the user being accepted. 
+
+we first check if the user has applied to the campaign. 
+If the user has not applied, it reverts with the UserHasNotApplied error.
+If the user has applied, the function updates the campaign's status to ``Active and assigns the user to the campaign. 
+Finally we delete the user's application and emit the **Assigned** event. 
 
 
