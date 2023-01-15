@@ -19,9 +19,10 @@ The use of a smart contract on the Ethereum blockchain ensures transparency and 
 
 
 ## Roadmap
-- [] Add a max application limit to campaigns, and time lock a transaction to pick a random user.
-- [] Add a function to allow users to withdraw their application.
-
+- [ ] Add a max application limit to campaigns, and 
+- [ ] Time lock a transaction to pick a random user, once application limit is finished.
+- [ ] Ability for users to withdraw their application.
+- [ ] Add a cap to the amount of open applications a user can have.
 
 ## Dependencies
 [OpenZeppelin Ownable](https://docs.openzeppelin.com/contracts/4.x/api/access#Ownable) 
@@ -35,7 +36,7 @@ Generate unique IDs for campaigns.
 
 | Name | Parameters | Description |
 |------|------------|-------------|
-| **Created** | `id` (uint256), `name` (string), `minLikes` (uint256), `endDate` (uint256), `timestamp` (uint256) | Emitted when a new campaign is created |
+| **Created** | `id` (uint256), `name` (string), `minLikes` (uint256), `endDate` (uint256), `brand` (address), `timestamp` (uint256) | Emitted when a new campaign is created |
 | **Applied** | `id` (uint256), `user` (address), `timestamp` (uint256) | Emitted when a user applies to participate in a campaign |
 | **Assigned** | `id` (uint256), `user` (address), `timestamp` (uint256) | Emitted when a user is assigned to a campaign |
 | **Liked** | `id` (uint256), `user` (address), `timestamp` (uint256) | Emitted when a user likes a campaign |
@@ -43,10 +44,7 @@ Generate unique IDs for campaigns.
 | **BrandAdded** | `brand` (address), `timestamp` (uint256) | Emitted when a brand is added to the whitelist |
 | **BrandRemoved** | `brand` (address), `name` (string) `description` (string) `timestamp` (uint256) | Emitted when a brand is removed from the whitelist |
 
-
 ## Functions
-
-### Create 
 
 ![Create](./assets/create.png)
 
@@ -70,8 +68,7 @@ If the checks pass, a new campaign is created and added to the campaigns mapping
 The counter keeping tracks of campaigns is incremented. 
 And we fire the  **Created** event with relevant details about the new campaign.
 
-
-### Submit Application
+---------
 
 ![submitApplication](./assets/submitApplication.png)
 
@@ -86,12 +83,11 @@ To be eligible to apply, the following conditions must be met:
 - The user must not have already applied for the campaign
 
 If any of these conditions are not met, the function will revert.
-If the user is eligible to apply, the we will set your applied status to true and fire the **Applied** event.
+If the user is eligible to apply, then we will set your applied status to true and fire the **Applied** event.
 
+--------
 
-### Review Application 
-
-![reviewApplication](./assets/reviewApplication.png)
+![approveApplication](./assets/approveApplication.png)
 
 This function is used to accept a user's application to participate in a campaign. 
 It is called by the contract owner and requires two parameters: 
@@ -99,9 +95,34 @@ It is called by the contract owner and requires two parameters:
 - the ID of the campaign 
 - address of the user being accepted. 
 
-we first check if the user has applied to the campaign. 
-If the user has not applied, it reverts with the UserHasNotApplied error.
-If the user has applied, the function updates the campaign's status to ``Active and assigns the user to the campaign. 
+We first check if the user has applied to the campaign. 
+
+- ❌ ~ reverts with the `PreConditionError`.
+- ✅ ~ the function updates the campaign's status to `ACTIVE` and assigns the user to the campaign. 
+
 Finally we delete the user's application and emit the **Assigned** event. 
+
+--------
+
+![like](./assets/like.png)
+
+This function allows users to like a campaign.
+It takes one parameter, the ID of the campaign.
+
+To be eligible to like a campaign, the following conditions must be met:
+
+- The campaign must exist
+- The status of the campaign must be `ACTIVE`
+- There must be time left on the campaign
+- You must not have already liked the campaign
+
+If any of these conditions are not met, the function will revert.
+If the user is eligible to like the campaign, 
+
+- We will increment the number of likes
+- Emit the **Liked** event.
+
+--------
+
 
 
