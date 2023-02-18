@@ -14,21 +14,22 @@ import "./Campaign.sol";
  */
 contract CampaignFactory is Ownable {
     // --------------------- STRUCTS & VARIABLES --------------------- //
-    struct Brand {
-        string name;
-        string logo;
-    }
 
     uint256 public MAX_CAMPAIGN_APPLICATION_WINDOW = 7 days;
     uint256 public MIN_CAMPAIGN_LIKE_TIME = 1 days;
 
+    Counters.Counter private campaignIds;
     using Counters for Counters.Counter;
-    Counters.Counter private campaignCounter;
+
+    struct Brand {
+        string name;
+        string logo;
+        uint256[] campaigns;
+    }
 
     // --------------------- MAPPINGS --------------------- //
-    mapping(address => Brand) public brands;
+    mapping(address => Brand) private brands;
     mapping(uint256 => address) public campaigns;
-    mapping(uint256 => mapping(address => bool)) public likes;
 
     // --------------------- EVENTS --------------------- //
 
@@ -51,25 +52,15 @@ contract CampaignFactory is Ownable {
     /**
      * @dev Event emitted when a campaign is created.
      * @param campaignId The ID of the campaign created.
+     * @param instance The address of the campaign instance.
      * @param brand The address of the brand that created the campaign.
      * @param name The name of the campaign created.
      */
     event CampaignCreated(
         uint256 indexed campaignId,
+        address indexed instance,
         address indexed brand,
         string name,
-        uint256 timestamp
-    );
-
-    /**
-     * @dev Event emitted when a user applies for a campaign.
-     * @param campaignId The ID of the campaign the user applied for.
-     * @param user The address of the user that applied for the campaign.
-     * @param timestamp The timestamp of when the user applied for the campaign.
-     */
-    event CampaignApplicationSubmitted(
-        uint256 indexed campaignId,
-        address indexed user,
         uint256 timestamp
     );
 
@@ -85,41 +76,14 @@ contract CampaignFactory is Ownable {
         uint256 timestamp
     );
 
-    /**
-     * @dev Event emitted when a user likes a campaign.
-     * @param campaignId The ID of the campaign the user liked.
-     * @param user The address of the user that liked the campaign.
-     * @param timestamp The timestamp of when the user liked the campaign.
-     */
-    event Liked(
-        uint256 indexed campaignId,
-        address indexed user,
-        uint256 timestamp
-    );
-
-    /**
-     * @dev Event emitted when a user withdraws from a campaign.
-     * @param campaignId The ID of the campaign the user withdrew from.
-     * @param user The address of the user that withdrew from the campaign.
-     * @param timestamp The timestamp of when the user withdrew from the campaign.
-     */
-    event PayoutWithdrawn(
-        uint256 indexed campaignId,
-        address indexed user,
-        uint256 timestamp
-    );
-
     // --------------------- MODIFIERS --------------------- //
 
     /// @dev Modifier that checks if the caller is a brand.
     modifier onlyBrand() {
-        require(brands[msg.sender], "Only brands can call this function");
-        _;
-    }
-
-    /// @dev Modifier that checks if the caller is a user.
-    modifier onlyUser() {
-        require(msg.sender != address(0), "Only users can call this function");
+        require(
+            brands[msg.sender].name != "",
+            "Only brands can call this function"
+        );
         _;
     }
 
@@ -142,29 +106,17 @@ contract CampaignFactory is Ownable {
     modifier campaignIsActive(uint256 _campaignId) {
         Campaign campaign = Campaign(campaigns[_campaignId]);
         require(
-            campaign.getCampaignDetails().status == Campaign.Status.Active,
+            campaign.getCampaignStatus() == Campaign.Status.Active,
             "Campaign not active"
         );
         require(
-            campaign.getCampaignDetails().activeTime >= block.timestamp,
+            campaign.getCampaignEnd() >= block.timestamp,
             "Campaign has expired"
         );
-        require(!campaign.hasMetLikes(), "Campaign has met minimum likes");
+        require(!campaign.hasMetLikeGoal(), "Campaign has met minimum likes");
         require(
-            campaign.getCampaignDetails().user != address(0),
+            campaign.getCampaignUser() != address(0),
             "No user associated with campaign"
-        );
-        _;
-    }
-
-    /**
-     * @dev Modifier that checks if a campaign is inactive.
-     * @param _campaignId The ID of the campaign to check.
-     */
-    modifier userHasNotLiked(uint256 _campaignId) {
-        require(
-            !likes[_campaignId][msg.sender],
-            "User has already liked this campaign"
         );
         _;
     }
@@ -182,59 +134,29 @@ contract CampaignFactory is Ownable {
         _;
     }
 
-    /**
-     * @dev Modifier that checks if a campaign is inactive.
-     * @param _campaignId The ID of the campaign to check.
-     */
-    modifier withinApplicationWindow(uint256 _campaignId) {
-        Campaign campaign = Campaign(campaigns[_campaignId]);
-        require(
-            campaign.getCampaignDetails().applicationTime >= block.timestamp,
-            "Campaign application window has expired"
-        );
-        _;
-    }
-
-    /**
-     * @dev Modifier that checks if a campaign is inactive.
-     * @param _campaignId The ID of the campaign to check.
-     */
-    modifier withinLikeWindow(uint256 _campaignId) {
-        Campaign campaign = Campaign(campaigns[_campaignId]);
-        require(
-            campaign.getCampaignDetails().likeTime >= block.timestamp,
-            "Campaign like window has expired"
-        );
-        _;
-    }
-
     // --------------------- FUNCTIONS --------------------- //
 
     /**
-     * @dev Allows the contract owner to add a new brand.
-     * @param _brandAddress The address of the brand.
-     * @param name The name of the brand.
+     * @dev Allows the contract owner to add a brand to the contract.
+     * @param brand The brand to add.
      */
-    function addBrand(
-        address _brandAddress,
-        string memory name
-    ) public onlyOwner {
-        require(_brandAddress != address(0), "Invalid brand address");
-        require(!brands[_brandAddress], "Brand already added");
-        brands[_brandAddress] = Brand(_brandAddress, name);
-        emit BrandAdded(_brandAddress, name, block.timestamp);
+    function addBrand(Brand memory brand) public onlyOwner {
+        require(brand.brandAddress != address(0), "Invalid brand address");
+        require(!brands[brand.brandAddress], "Brand already added");
+        brands[brand.brandAddress] = brand;
+        emit BrandAdded(brand.brandAddress, brand.name, block.timestamp);
     }
 
     /**
      * @dev Allows the contract owner to remove a brand from the contract.
-     * @param _brandAddress The address of the brand to remove.
+     * @param brandAddress The address of the brand to remove.
      */
-    function removeBrand(address _brandAddress) public onlyOwner {
-        require(_brandAddress != address(0), "Invalid brand address");
-        require(brands[_brandAddress], "Brand not added");
-        string memory name = brands[_brandAddress].name;
-        delete brands[_brandAddress];
-        emit BrandRemoved(_brandAddress, name, block.timestamp);
+    function removeBrand(address brandAddress) public onlyOwner {
+        require(brandAddress != address(0), "Invalid brand address");
+        require(brands[brandAddress], "Brand not added");
+        string memory name = brands[brandAddress].name;
+        delete brands[brandAddress];
+        emit BrandRemoved(brandAddress, name, block.timestamp);
     }
 
     /**
@@ -243,19 +165,19 @@ contract CampaignFactory is Ownable {
      * @param _name The name of the campaign.
      * @param _description The description of the campaign.
      * @param _image The image of the campaign.
+     * @param _brand The address of the brand that created the campaign.
      * @param _minLikes The minimum number of likes required for the campaign.
      * @param _applyTime The time in seconds that the campaign will be open for applications.
      * @param _activeTime The time in seconds that the campaign will be active for.
-     * @param _brand The address of the brand that created the campaign.
      */
     function createCampaign(
         string memory _name,
         string memory _description,
         string memory _image,
+        address _brand,
         uint256 _minLikes,
         uint256 _applyTime,
-        uint256 _activeTime,
-        address _brand
+        uint256 _activeTime
     ) public payable onlyBrand {
         require(msg.value > 0, "Payout must be greater than zero");
         require(_applyTime > 0, "Apply time must be greater than zero");
@@ -263,58 +185,38 @@ contract CampaignFactory is Ownable {
         require(_minLikes > 0, "Minimum likes must be greater than zero");
         require(_brand != address(0), "Invalid brand address");
 
+        uint256 campaignId = campaignIds.current();
+        campaignIds.increment();
+
         Campaign newCampaign = new Campaign(
             _name,
             _description,
             _image,
             _minLikes,
             msg.sender,
-            msg.value,
+            0,
             _applyTime,
             _activeTime,
-            _brand
+            _brand,
+            campaignId
         );
 
-        campaigns[newCampaign.getCampaignDetails().campaignId] = address(
-            newCampaign
-        );
+        address payable campaignAddress = payable(address(newCampaign));
+        campaignAddress.transfer(msg.value);
+
+        campaigns[campaignId] = address(newCampaign);
 
         emit CampaignCreated(
-            newCampaign.getCampaignDetails().campaignId,
+            campaignId,
+            address(newCampaign),
             msg.sender,
             _name,
             block.timestamp
         );
-    }
 
-    /**
-     * @dev Allows a user to apply for a campaign.
-     * @notice we use onlyUser modifier to check if the caller is a user.
-     * @param _campaignId The ID of the campaign to apply for.
-     */
-    function applyForCampaign(uint256 _campaignId) public onlyUser {
-        Campaign campaign = Campaign(campaigns[_campaignId]);
-        require(
-            campaign.getCampaignDetails().status == Campaign.Status.Active,
-            "Campaign is not active"
-        );
-        require(
-            campaign.getCampaignDetails().applicationWindowEnd >=
-                block.timestamp,
-            "Application window has closed"
-        );
-        require(
-            !campaign.hasUser(msg.sender),
-            "You are already associated with this campaign"
-        );
+        brands[_brand].campaigns.push(campaignId);
 
-        campaign.submitApplication(msg.sender);
-
-        emit CampaignApplicationSubmitted(
-            _campaignId,
-            msg.sender,
-            block.timestamp
-        );
+        newCampaign.transferOwnership(address(this));
     }
 
     /**
@@ -335,55 +237,7 @@ contract CampaignFactory is Ownable {
         campaignIsActive(_campaignId)
     {
         Campaign campaign = Campaign(campaigns[_campaignId]);
-        require(
-            campaign.getCampaignDetails().brand == msg.sender,
-            "Only the brand associated with the campaign can assign a user"
-        );
-        require(
-            campaign.getCampaignDetails().user == address(0),
-            "Campaign already has a user associated with it"
-        );
-        require(
-            campaign.hasApplication(_user),
-            "User has not applied for this campaign"
-        );
-
-        campaign.assignUser(_user);
-
+        campaign._assign(_user);
         emit CampaignUserAssigned(_campaignId, _user, block.timestamp);
-    }
-
-    /**
-     * @dev Allows a user to like a campaign.
-     * @notice we use onlyUser modifier to check if the caller is a user.
-     * @notice we use campaignExists modifier to check if the campaign exists.
-     * @notice we use campaignIsActive modifier to check if the campaign is active.
-     * @notice we use userHasNotLiked modifier to check if the user has not liked the campaign.
-     * @notice we use campaignHasNotExpired modifier to check if the campaign has not expired.
-     * @param _campaignId The ID of the campaign to like.
-     */
-    function likeCampaign(
-        uint256 _campaignId
-    )
-        public
-        onlyUser
-        campaignExists(_campaignId)
-        campaignIsActive(_campaignId)
-        userHasNotLiked(_campaignId)
-        campaignHasNotExpired(_campaignId)
-    {
-        Campaign campaign = campaigns[_campaignId];
-
-        campaign.incrementTotalLikes();
-        likes[_campaignId][msg.sender] = true;
-
-        emit Liked(_campaignId, msg.sender, block.timestamp);
-
-        if (
-            campaign.getCampaignDetails().totalLikes >=
-            campaign.getCampaignDetails().minLikes
-        ) {
-            campaign.updateCampaignStatus(Campaign.Status.Finished);
-        }
     }
 }

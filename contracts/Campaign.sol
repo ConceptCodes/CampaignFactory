@@ -2,19 +2,76 @@
 pragma solidity ^0.8.9;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/Counters.sol";
 
-contract Campaign {
-    enum Status {
-        Created,
-        Active,
-        Finished
-    }
+contract Campaign is Ownable {
+    // ----------------- Variables -----------------
+    CampaignDetails private campaignDetails;
+
+    using Counters for Counters.Counter;
+    Counters.Counter private totalLikes;
+    Counters.Counter private numApplications;
+
+    // ----------------- Events -----------------
+
+    /**
+     * @dev Emitted when the status of the campaign is updated
+     * @param status the new status of the campaign
+     * @param timestamp timestamp of the event
+     */
+    event StatusUpdated(Status status, uint256 timestamp);
+
+    /**
+     * @dev Emitted when the campaign is transferred to a new owner
+     * @param newOwner the new owner of the campaign
+     * @param timestamp timestamp of the event
+     */
+    event OwnershipTransfered(address newOwner, uint256 timestamp);
+
+    /**
+     * @dev Emitted when a user submits an application to the campaign
+     * @param user the user who submitted the application
+     * @param timestamp timestamp of the event
+     */
+    event Liked(address user, uint256 timestamp);
+
+    /**
+     * @dev Emitted when a user submits an application to the campaign
+     * @param user the user who submitted the application
+     * @param numApplications number of applications to the campaign
+     * @param timestamp timestamp of the event
+     */
+    event UserSelected(
+        address user,
+        uint256 numApplications,
+        uint256 timestamp
+    );
+
+    /**
+     * @dev Emitted when a user submits an application to the campaign
+     * @param user the user who submitted the application
+     * @param timestamp timestamp of the event
+     */
+    event Applied(address user, uint256 timestamp);
+
+    /**
+     * @dev Emitted when a user withdraws their payout from the campaign
+     * @param totalLikes total number of likes the campaign received
+     * @param minLikes minimum number of likes required to receive payout
+     * @param timestamp timestamp of the event
+     */
+    event PayoutWithdrawal(
+        uint256 totalLikes,
+        uint256 minLikes,
+        uint256 timestamp
+    );
+
+    // ----------------- Structs, Enums, Mappings -----------------
 
     struct CampaignDetails {
         string name;
         string description;
         string image;
-        uint256 totalLikes;
         uint256 minLikes;
         Status status;
         uint256 payout;
@@ -22,11 +79,18 @@ contract Campaign {
         address brand;
         uint256 applicationWindowEnd;
         uint256 campaignEnd;
-        mapping(address => bool) applications;
     }
 
-    CampaignDetails private campaignDetails;
+    enum Status {
+        Created,
+        Active,
+        Finished
+    }
 
+    mapping(address => bool) public likes;
+    mapping(address => bool) private applications;
+
+    // ----------------- Constructor -----------------
     constructor(
         string memory _name,
         string memory _description,
@@ -39,16 +103,26 @@ contract Campaign {
         campaignDetails.name = _name;
         campaignDetails.description = _description;
         campaignDetails.image = _image;
-        campaignDetails.totalLikes = 0;
         campaignDetails.minLikes = _minLikes;
         campaignDetails.status = Status.Created;
         campaignDetails.payout = msg.value;
         campaignDetails.user = address(0);
         campaignDetails.brand = _brand;
+
         campaignDetails.applicationWindowEnd = block.timestamp + _applyTime;
         campaignDetails.campaignEnd =
             campaignDetails.applicationWindowEnd +
             _activeTime;
+
+        emit StatusUpdated(campaignDetails.status, block.timestamp);
+    }
+
+    modifier isBrand() {
+        require(
+            msg.sender == campaignDetails.brand,
+            "Only the brand can call this function"
+        );
+        _;
     }
 
     // ----------------- Getters -----------------
@@ -70,17 +144,12 @@ contract Campaign {
         return campaignDetails.user;
     }
 
-    function getCampaignStats()
-        public
-        view
-        returns (uint256, uint256, Status, uint256)
-    {
-        return (
-            campaignDetails.totalLikes,
-            campaignDetails.minLikes,
-            campaignDetails.status,
-            campaignDetails.payout
-        );
+    function getCampaignStatus() public view returns (Status) {
+        return campaignDetails.status;
+    }
+
+    function getTotalLikes() public view returns (uint256) {
+        return totalLikes.current();
     }
 
     function getMinLikes() public view returns (uint256) {
@@ -99,23 +168,25 @@ contract Campaign {
         return campaignDetails.applicationWindowEnd;
     }
 
+    function hasMetLikeGoal() public view returns (bool) {
+        return totalLikes.current() >= campaignDetails.minLikes;
+    }
+
+    function getBalance() public view returns (uint256) {
+        return address(this).balance;
+    }
+
     // ----------------- Setters -----------------
-    function updateCampaignStatus(Status _status) public {
+    function updateStatus(Status _status) public onlyOwner {
         campaignDetails.status = _status;
     }
 
-    function updateCampaignUser(address _user) public {
+    function _assign(address _user) public isBrand {
         campaignDetails.user = _user;
     }
 
-    // ----------------- Computed Getters -----------------
-
-    function hasMetLikes() public view returns (bool) {
-        return campaignDetails.totalLikes >= campaignDetails.minLikes;
-    }
-
     // ----------------- Logic -----------------
-    function submitApplication(address _user) public {
+    function applyForCampaign() public {
         require(
             campaignDetails.status == Status.Created,
             "Campaign is not accepting applications"
@@ -124,14 +195,13 @@ contract Campaign {
             block.timestamp <= campaignDetails.applicationWindowEnd,
             "Application window has closed"
         );
-        require(
-            !campaignDetails.applications[_user],
-            "User has already applied"
-        );
-        campaignDetails.applications[_user] = true;
+        require(!applications[msg.sender], "User has already applied");
+        applications[msg.sender] = true;
+        numApplications.increment();
+        emit Applied(msg.sender, block.timestamp);
     }
 
-    function registerLike() public {
+    function _like() public {
         require(
             campaignDetails.status == Status.Active,
             "Campaign is not active"
@@ -140,10 +210,13 @@ contract Campaign {
             block.timestamp <= campaignDetails.campaignEnd,
             "Campaign has ended"
         );
-        campaignDetails.totalLikes++;
+        require(!likes[msg.sender], "User has already liked");
+        emit Liked(msg.sender, block.timestamp);
+        totalLikes.increment();
     }
 
-    function payout() public {
+    // TODO: Add reentrancy guard
+    function payout() public onlyOwner {
         require(
             campaignDetails.status == Status.Finished,
             "Campaign is not finished"
@@ -151,5 +224,11 @@ contract Campaign {
         require(campaignDetails.user != address(0), "Campaign has no user");
         require(campaignDetails.payout > 0, "Campaign has no payout");
         payable(campaignDetails.user).transfer(campaignDetails.payout);
+
+        emit PayoutWithdrawal(
+            totalLikes.current(),
+            campaignDetails.minLikes,
+            block.timestamp
+        );
     }
 }

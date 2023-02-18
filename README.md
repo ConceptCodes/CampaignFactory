@@ -44,85 +44,64 @@ Generate unique IDs for campaigns.
 | **BrandAdded** | `brand` (address), `timestamp` (uint256) | Emitted when a brand is added to the whitelist |
 | **BrandRemoved** | `brand` (address), `name` (string) `description` (string) `timestamp` (uint256) | Emitted when a brand is removed from the whitelist |
 
-## Functions
+## User Flow
+1. User Authenticates with their Ethereum address.
+2. Brand deploys a new campaign via the CampaignFactory.
+   - Brand sends funds to the newly created campaign contract.
+   - Campaign ownership remains with the factory deployer until the application window ends.
+3. User applies for a campaign via the dApp.
+   - User's address is added to the list of applicants.
+4. After the application window closes, the brand has 72 hours to choose someone to complete this challenge.
+    - Brand will call the `selectUser` function to select a user.
+    - If no user is selected within 72 hours, the campaign is cancelled and funds are returned to the brand.
+5. If a user is selected, ownership of the campaign is transferred back to the factory deployer, and we can start the campaign.
+   - like goal is reached, user can call the `payout` function to withdraw the funds if time limit has not expired.
+   - like goal is not reached, the campaign is cancelled and funds are returned to the brand.
+6. The campaign is now complete and archived.
 
-![Create](./assets/create.png)
+## Data Models
 
-This function allows a brand to create a new campaign. 
-It takes in several parameters: 
+#### Campaign Details
 
-- A name for the campaign, 
-- A description,
-- An image, 
-- The minimum number of likes needed to finish the campaign, 
-- Length of time the campaign will be active for. 
+| Field              | Type   
+| ------------------ | ------ 
+| name               | string 
+| description        | string 
+| image              | string 
+| brand              | address 
+| likeGoal           | uint   
+| applicationWindow  | uint   
+| campaignWindow     | uint   
+| status             | enum   
+| numApplications    | uint  
+| applications       | mapping(address => CampaignApplication)
+| numLikes           | uint   
+| payoutAmount       | uint   
+| selectedApplicant  | address  
+| timeCampaignStart  | uint   
+| timeCampaignEnd    | uint   
 
-we then perform several checks to ensure that the input data is valid, such as making sure that the
+#### Campaign Stats
 
-- Active time and minimum likes are positive values
-- Name is not an empty string
-- user sent a positive amount of tokens. 
+| Field           | Type   |
+| --------------- | ------ |
+| likeGoal        | uint   |
+| numApplications | uint   |
+| numLikes        | uint   |
+| payoutAmount    | uint   |
 
-If any of these checks fail, the function reverts. 
-If the checks pass, a new campaign is created and added to the campaigns mapping with a unique ID. 
-The counter keeping tracks of campaigns is incremented. 
-And we fire the  **Created** event with relevant details about the new campaign.
+#### Campaign Application
 
----------
+| Field       | Type     |
+| ----------- | -------- |
+| timestamp   | uint     |
+| status      | enum     |
 
-![submitApplication](./assets/submitApplication.png)
 
-This function allows users to apply to participate in a campaign. 
-It takes one parameter, the ID of the campaign.
+## Functions [CampaignFactory.sol](/contracts/Campaign.sol)
 
-To be eligible to apply, the following conditions must be met:
-
-- The campaign must exist
-- The status of the campaign must not be `ACTIVE`
-- There must be time left on the campaign
-- The user must not have already applied for the campaign
-
-If any of these conditions are not met, the function will revert.
-If the user is eligible to apply, then we will set your applied status to true and fire the **Applied** event.
-
---------
-
-![approveApplication](./assets/approveApplication.png)
-
-This function is used to accept a user's application to participate in a campaign. 
-It is called by the contract owner and requires two parameters: 
-
-- the ID of the campaign 
-- address of the user being accepted. 
-
-We first check if the user has applied to the campaign. 
-
-- ❌ ~ reverts with the `PreConditionError`.
-- ✅ ~ the function updates the campaign's status to `ACTIVE` and assigns the user to the campaign. 
-
-Finally we delete the user's application and emit the **Assigned** event. 
-
---------
-
-![like](./assets/like.png)
-
-This function allows users to like a campaign.
-It takes one parameter, the ID of the campaign.
-
-To be eligible to like a campaign, the following conditions must be met:
-
-- The campaign must exist
-- The status of the campaign must be `ACTIVE`
-- There must be time left on the campaign
-- You must not have already liked the campaign
-
-If any of these conditions are not met, the function will revert.
-If the user is eligible to like the campaign, 
-
-- We will increment the number of likes
-- Emit the **Liked** event.
-
---------
+| Name | Parameters | Description |
+|------|------------|-------------|
 
 
 
