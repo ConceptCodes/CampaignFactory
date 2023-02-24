@@ -3,14 +3,24 @@ pragma solidity ^0.8.9;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/Counters.sol";
+import "@openzeppelin/contracts/access/AccessControl.sol";
 
-contract Campaign is Ownable {
+/**
+ * @title Campaign
+ * @author conceptcodes.eth
+ * @notice This contract is used to represent a campaign.
+ * @dev All function calls are currently intended to be made by the dApp only
+ */
+contract Campaign is Ownable, AccessControl {
     // ----------------- Variables -----------------
-    CampaignDetails private campaignDetails;
+    Details private campaignDetails;
 
     using Counters for Counters.Counter;
     Counters.Counter private totalLikes;
     Counters.Counter private numApplications;
+
+    bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
+    bytes32 public constant USER_ROLE = keccak256("USER_ROLE");
 
     // ----------------- Events -----------------
 
@@ -22,13 +32,6 @@ contract Campaign is Ownable {
     event StatusUpdated(Status status, uint256 timestamp);
 
     /**
-     * @dev Emitted when the campaign is transferred to a new owner
-     * @param newOwner the new owner of the campaign
-     * @param timestamp timestamp of the event
-     */
-    event OwnershipTransfered(address newOwner, uint256 timestamp);
-
-    /**
      * @dev Emitted when a user submits an application to the campaign
      * @param user the user who submitted the application
      * @param timestamp timestamp of the event
@@ -36,7 +39,7 @@ contract Campaign is Ownable {
     event Liked(address user, uint256 timestamp);
 
     /**
-     * @dev Emitted when a user submits an application to the campaign
+     * @dev Emitted when a user's application is chosen
      * @param user the user who submitted the application
      * @param numApplications number of applications to the campaign
      * @param timestamp timestamp of the event
@@ -60,7 +63,7 @@ contract Campaign is Ownable {
      * @param minLikes minimum number of likes required to receive payout
      * @param timestamp timestamp of the event
      */
-    event PayoutWithdrawal(
+    event Withdrawal(
         uint256 totalLikes,
         uint256 minLikes,
         uint256 timestamp
@@ -68,7 +71,7 @@ contract Campaign is Ownable {
 
     // ----------------- Structs, Enums, Mappings -----------------
 
-    struct CampaignDetails {
+    struct Details {
         string name;
         string description;
         string image;
@@ -117,34 +120,25 @@ contract Campaign is Ownable {
         emit StatusUpdated(campaignDetails.status, block.timestamp);
     }
 
-    modifier isBrand() {
-        require(
-            msg.sender == campaignDetails.brand,
-            "Only the brand can call this function"
-        );
-        _;
-    }
-
     // ----------------- Getters -----------------
 
-    function getCampaignData()
+    function getDetails()
         public
         view
-        returns (string memory, string memory, string memory, address)
+        returns (string memory, string memory, string memory)
     {
         return (
             campaignDetails.name,
             campaignDetails.description,
-            campaignDetails.image,
-            campaignDetails.brand
+            campaignDetails.image
         );
     }
 
-    function getCampaignUser() public view returns (address) {
+    function getUser() public view returns (address) {
         return campaignDetails.user;
     }
 
-    function getCampaignStatus() public view returns (Status) {
+    function getStatus() public view returns (Status) {
         return campaignDetails.status;
     }
 
@@ -156,7 +150,7 @@ contract Campaign is Ownable {
         return campaignDetails.minLikes;
     }
 
-    function getPayout() public view returns (uint256) {
+    function getPayoutAmt() public view returns (uint256) {
         return campaignDetails.payout;
     }
 
@@ -176,13 +170,18 @@ contract Campaign is Ownable {
         return address(this).balance;
     }
 
+    function getBrand() public view returns (address) {
+        return campaignDetails.brand;
+    }
+
     // ----------------- Setters -----------------
-    function updateStatus(Status _status) public onlyOwner {
+    function updateStatus(Status _status) public onlyRole(ADMIN_ROLE) {
         campaignDetails.status = _status;
     }
 
-    function _assign(address _user) public isBrand {
+    function assign(address _user) public onlyRole(ADMIN_ROLE) {
         campaignDetails.user = _user;
+        _grantRole(USER_ROLE, _user);
     }
 
     // ----------------- Logic -----------------
@@ -195,13 +194,16 @@ contract Campaign is Ownable {
             block.timestamp <= campaignDetails.applicationWindowEnd,
             "Application window has closed"
         );
-        require(!applications[msg.sender], "User has already applied");
+        require(
+            !applications[msg.sender],
+            "You have already applied to this campaign"
+        );
         applications[msg.sender] = true;
         numApplications.increment();
         emit Applied(msg.sender, block.timestamp);
     }
 
-    function _like() public {
+    function like() public {
         require(
             campaignDetails.status == Status.Active,
             "Campaign is not active"
@@ -210,13 +212,13 @@ contract Campaign is Ownable {
             block.timestamp <= campaignDetails.campaignEnd,
             "Campaign has ended"
         );
-        require(!likes[msg.sender], "User has already liked");
+        require(!likes[msg.sender], "You have already liked this campaign");
         emit Liked(msg.sender, block.timestamp);
         totalLikes.increment();
     }
 
     // TODO: Add reentrancy guard
-    function payout() public onlyOwner {
+    function payout() public onlyOwner onlyRole(USER_ROLE) {
         require(
             campaignDetails.status == Status.Finished,
             "Campaign is not finished"
@@ -225,7 +227,7 @@ contract Campaign is Ownable {
         require(campaignDetails.payout > 0, "Campaign has no payout");
         payable(campaignDetails.user).transfer(campaignDetails.payout);
 
-        emit PayoutWithdrawal(
+        emit Withdrawal(
             totalLikes.current(),
             campaignDetails.minLikes,
             block.timestamp

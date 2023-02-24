@@ -16,7 +16,7 @@ contract CampaignFactory is Ownable {
     // --------------------- STRUCTS & VARIABLES --------------------- //
 
     uint256 public MAX_CAMPAIGN_APPLICATION_WINDOW = 7 days;
-    uint256 public MIN_CAMPAIGN_LIKE_TIME = 1 days;
+    uint256 public MIN_CAMPAIGN_ACTIVE_TIME = 1 days;
 
     Counters.Counter private campaignIds;
     using Counters for Counters.Counter;
@@ -25,10 +25,11 @@ contract CampaignFactory is Ownable {
         string name;
         string logo;
         uint256[] campaigns;
+        bool onboarded;
     }
 
     // --------------------- MAPPINGS --------------------- //
-    mapping(address => Brand) private brands;
+    mapping(address => Brand) public brands;
     mapping(uint256 => address) public campaigns;
 
     // --------------------- EVENTS --------------------- //
@@ -81,7 +82,7 @@ contract CampaignFactory is Ownable {
     /// @dev Modifier that checks if the caller is a brand.
     modifier onlyBrand() {
         require(
-            brands[msg.sender].name != "",
+            brands[msg.sender].onboarded,
             "Only brands can call this function"
         );
         _;
@@ -138,13 +139,19 @@ contract CampaignFactory is Ownable {
 
     /**
      * @dev Allows the contract owner to add a brand to the contract.
-     * @param brand The brand to add.
+     * @param name The name of the brand.
+     * @param logo The logo of the brand.
+     * @param brandAddress The address of the brand.
      */
-    function addBrand(Brand memory brand) public onlyOwner {
-        require(brand.brandAddress != address(0), "Invalid brand address");
-        require(!brands[brand.brandAddress], "Brand already added");
-        brands[brand.brandAddress] = brand;
-        emit BrandAdded(brand.brandAddress, brand.name, block.timestamp);
+    function addBrand(
+        string memory name,
+        string memory logo,
+        address brandAddress
+    ) public onlyOwner {
+        require(brandAddress != address(0), "Invalid brand address");
+        require(!brands[brandAddress].onboarded, "Brand already added");
+        brands[brandAddress] = Brand(name, logo, new uint256[](0), true);
+        emit BrandAdded(brandAddress, name, block.timestamp);
     }
 
     /**
@@ -153,7 +160,7 @@ contract CampaignFactory is Ownable {
      */
     function removeBrand(address brandAddress) public onlyOwner {
         require(brandAddress != address(0), "Invalid brand address");
-        require(brands[brandAddress], "Brand not added");
+        require(brands[brandAddress].onboarded, "Brand not added");
         string memory name = brands[brandAddress].name;
         delete brands[brandAddress];
         emit BrandRemoved(brandAddress, name, block.timestamp);
@@ -180,9 +187,20 @@ contract CampaignFactory is Ownable {
         uint256 _activeTime
     ) public payable onlyBrand {
         require(msg.value > 0, "Payout must be greater than zero");
+
         require(_applyTime > 0, "Apply time must be greater than zero");
-        require(_activeTime > 0, "Active time must be greater than zero");
+        require(
+            _applyTime < MAX_CAMPAIGN_APPLICATION_WINDOW,
+            "Application window is too large"
+        );
+
+        require(
+            _activeTime > MIN_CAMPAIGN_ACTIVE_TIME,
+            "Active time must be greater than zero"
+        );
+
         require(_minLikes > 0, "Minimum likes must be greater than zero");
+
         require(_brand != address(0), "Invalid brand address");
 
         uint256 campaignId = campaignIds.current();
@@ -217,6 +235,8 @@ contract CampaignFactory is Ownable {
         brands[_brand].campaigns.push(campaignId);
 
         newCampaign.transferOwnership(address(this));
+        newCampaign._grantRole(AccessControl.DEFAULT_ADMIN_ROLE, address(this));
+        newCampaign.
     }
 
     /**
@@ -240,4 +260,10 @@ contract CampaignFactory is Ownable {
         campaign._assign(_user);
         emit CampaignUserAssigned(_campaignId, _user, block.timestamp);
     }
+
+    function allowBrandToSelectUser(address contractAddress, uint256 timestamp) public onlyOwner {
+        Campaign campaign = Campaign(contractAddress);
+        campaign.allowBrand(timestamp);
+    }
+
 }
